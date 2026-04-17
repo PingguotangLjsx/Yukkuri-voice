@@ -15,12 +15,11 @@ from urllib.parse import quote
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-# ---------- 页面配置 ----------
 st.set_page_config(page_title="油库里语音生成器", page_icon="🎤", layout="wide")
 st.title("🎤 油库里语音生成器 (网页版)")
 st.caption("中文 → 空耳片假名 / 日语翻译 → AquesTalk 语音合成")
 
-# ---------- 会话状态初始化 ----------
+# ---------- 会话状态 ----------
 if "generated_audio_files" not in st.session_state:
     st.session_state.generated_audio_files = []
 if "subtitle_file_path" not in st.session_state:
@@ -103,7 +102,7 @@ api_templates = [
     "https://www.yukumo.net/api/v2/aqtk10/koe.mp3?type=f2e&speed=70&volume=100&pitch=50&accent=50&lmd=50&fsc=180&kanji={text}"
 ]
 
-# ---------- 核心工具函数 ----------
+# ---------- 工具函数 ----------
 def get_ffmpeg_path():
     import shutil
     ffmpeg_path = shutil.which('ffmpeg')
@@ -192,7 +191,7 @@ def convert_to_katakana(text):
             url = "https://www.ltool.net/chinese-simplified-and-traditional-characters-pinyin-to-katakana-converter-in-simplified-chinese.php"
             data = {'contents': text, 'firstinput': 'OK', 'option': '1', 'optionext': 'zenkaku'}
             headers = {'User-Agent': 'Mozilla/5.0', 'Referer': url}
-            # 增加超时设置
+            time.sleep(random.uniform(0.5, 1.5))
             resp = requests.post(url, data=data, headers=headers, timeout=15)
             soup = BeautifulSoup(resp.text, 'html.parser')
             res_div = soup.find('div', {'id': 'result'})
@@ -200,9 +199,9 @@ def convert_to_katakana(text):
                 final = res_div.find('div', {'class': 'finalresult'})
                 if final:
                     return final.text.strip()
-        except Exception:
+        except:
             if attempt < 2:
-                time.sleep(2 ** attempt)  # 指数退避
+                time.sleep(2 ** attempt)
     return None
 
 def translate_with_mymemory(text, target_lang='ja', source_lang='zh'):
@@ -349,12 +348,8 @@ st.subheader("📝 输入文本 (每行生成一个独立语音)")
 default_text = "我喜欢你"
 text_input = st.text_area("在此输入文本，一行一条", value=default_text, height=200)
 
-col1, col2, _ = st.columns([1, 1, 2])
+col1, _ = st.columns([1, 2])
 with col1:
-    if st.button("🧹 清空文本", use_container_width=True):
-        st.session_state.text_area_val = ""
-        st.rerun()
-with col2:
     if st.button("📊 统计行数", use_container_width=True):
         lines = [l.strip() for l in text_input.split("\n") if l.strip()]
         st.toast(f"共 {len(lines)} 行文本")
@@ -370,7 +365,6 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
     if not lines:
         st.warning("请输入至少一行文本")
     else:
-        # 重置状态
         st.session_state.generated_audio_files = []
         st.session_state.subtitle_file_path = None
         st.session_state.zip_data = None
@@ -381,7 +375,6 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
         st.session_state.progress_text = "准备中..."
 
         total = len(lines)
-        # 恢复为自动调节并发数（最多10线程），避免被网站封禁
         max_workers = min(total, 10)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -414,7 +407,7 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
                 i = future_to_idx[future]
                 line = lines[i]
                 try:
-                    result = future.result(timeout=20)  # 增加整体超时
+                    result = future.result(timeout=20)
                     if result:
                         if convert_mode == "空耳":
                             result = re.sub(r'\([^)]*\)', '', result).replace(' ', '')
@@ -467,7 +460,6 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
         audio_files.sort(key=lambda x: x[0])
         st.session_state.generated_audio_files = audio_files
 
-        # 生成字幕
         if generate_subtitle and subtitle_entries:
             subtitle_entries.sort(key=lambda x: x[0])
             srt_path = os.path.join(output_dir, "subtitles.srt")
@@ -481,7 +473,6 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
             st.session_state.subtitle_file_path = srt_path
             add_log("📄 字幕文件已生成")
 
-        # 生成 ZIP 包
         if audio_files:
             zip_path = output_dir + ".zip"
             shutil.make_archive(output_dir, 'zip', output_dir)
@@ -494,7 +485,6 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
         add_log(f"===== 完成! 成功 {success_count}/{len(converted)} =====")
         st.rerun()
 
-# 显示日志
 log_placeholder.text("\n".join(st.session_state.logs[-10:]))
 
 # ---------- 展示生成结果 ----------
@@ -520,20 +510,19 @@ if st.session_state.generated_audio_files:
             )
 
     st.divider()
-    col_zip, col_sub, _ = st.columns([1, 1, 2])
-    with col_zip:
+    col1, col2 = st.columns(2)
+    with col1:
         if st.session_state.zip_data:
-            st.markdown("### 📦 打包下载")
             st.markdown(
                 get_binary_file_downloader_html(
                     st.session_state.zip_data,
-                    file_label="点击下载全部音频 (ZIP)",
+                    file_label="📦 打包下载全部音频 (ZIP)",
                     file_name=st.session_state.zip_name,
                     button_style=True
                 ),
                 unsafe_allow_html=True
             )
-    with col_sub:
+    with col2:
         if st.session_state.subtitle_file_path and os.path.exists(st.session_state.subtitle_file_path):
             with open(st.session_state.subtitle_file_path, "rb") as f:
                 st.download_button(
