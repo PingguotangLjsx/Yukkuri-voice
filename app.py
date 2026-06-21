@@ -15,6 +15,10 @@ from urllib.parse import quote
 from datetime import datetime
 from bs4 import BeautifulSoup
 
+# 新增导入本地映射表
+import pypinyin
+from katakana_map import PINYIN_TO_KATAKANA
+
 st.set_page_config(page_title="油库里语音生成器", page_icon="🎤", layout="wide")
 st.title("🎤 油库里语音生成器 (网页版)")
 st.caption("中文 → 空耳片假名 / 日语翻译 → AquesTalk 语音合成")
@@ -185,24 +189,23 @@ def process_audio_pitch_in_memory(audio_data, pitch_factor):
             except:
                 pass
 
+# ---- 替换为本地映射表转换函数 ----
 def convert_to_katakana(text):
-    for attempt in range(3):
-        try:
-            url = "https://www.ltool.net/chinese-simplified-and-traditional-characters-pinyin-to-katakana-converter-in-simplified-chinese.php"
-            data = {'contents': text, 'firstinput': 'OK', 'option': '1', 'optionext': 'zenkaku'}
-            headers = {'User-Agent': 'Mozilla/5.0', 'Referer': url}
-            time.sleep(random.uniform(0.5, 1.5))
-            resp = requests.post(url, data=data, headers=headers, timeout=15)
-            soup = BeautifulSoup(resp.text, 'html.parser')
-            res_div = soup.find('div', {'id': 'result'})
-            if res_div:
-                final = res_div.find('div', {'class': 'finalresult'})
-                if final:
-                    return final.text.strip()
-        except:
-            if attempt < 2:
-                time.sleep(2 ** attempt)
-    return None
+    """
+    将中文文本转换为片假名（基于本地拼音映射表）
+    与原函数保持相同接口：返回转换后的字符串，并去除括号和空格。
+    """
+    pinyin_list = pypinyin.lazy_pinyin(text)
+    result = []
+    for ch, py in zip(text, pinyin_list):
+        if py in PINYIN_TO_KATAKANA:
+            result.append(PINYIN_TO_KATAKANA[py])
+        else:
+            # 非汉字或未收录音节保留原字符
+            result.append(ch)
+    result_str = ''.join(result)
+    result_str = re.sub(r'\([^)]*\)', '', result_str).replace(' ', '')
+    return result_str
 
 def translate_with_mymemory(text, target_lang='ja', source_lang='zh'):
     url = "https://api.mymemory.translated.net/get"
@@ -410,6 +413,7 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
                     result = future.result(timeout=20)
                     if result:
                         if convert_mode == "空耳":
+                            # 原代码中有额外的后处理，现在已在函数内完成，保留以防万一
                             result = re.sub(r'\([^)]*\)', '', result).replace(' ', '')
                         converted.append((i, line, result))
                         add_log(f"✅ 转换 [{i+1}/{total}]: {line[:20]}...")
