@@ -15,7 +15,6 @@ from urllib.parse import quote
 from datetime import datetime
 from bs4 import BeautifulSoup
 
-# 新增导入本地映射表
 import pypinyin
 from katakana_map import PINYIN_TO_KATAKANA
 
@@ -189,19 +188,23 @@ def process_audio_pitch_in_memory(audio_data, pitch_factor):
             except:
                 pass
 
-# ---- 替换为本地映射表转换函数 ----
+# ---------- 本地转换函数（保留英文） ----------
 def convert_to_katakana(text):
     """
     将中文文本转换为片假名（基于本地拼音映射表）
-    与原函数保持相同接口：返回转换后的字符串，并去除括号和空格。
+    英文字母 (a-zA-Z) 原样保留，不转换。
+    数字、标点等非中文非英文字符也会原样保留。
     """
     pinyin_list = pypinyin.lazy_pinyin(text)
     result = []
     for ch, py in zip(text, pinyin_list):
-        if py in PINYIN_TO_KATAKANA:
+        # 如果字符是英文字母（a-z 或 A-Z），原样保留
+        if ch.isalpha() and ch.isascii():
+            result.append(ch)
+        elif py in PINYIN_TO_KATAKANA:
             result.append(PINYIN_TO_KATAKANA[py])
         else:
-            # 非汉字或未收录音节保留原字符
+            # 未收录的音节（如特殊符号、数字等）保留原字符
             result.append(ch)
     result_str = ''.join(result)
     result_str = re.sub(r'\([^)]*\)', '', result_str).replace(' ', '')
@@ -413,7 +416,7 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
                     result = future.result(timeout=20)
                     if result:
                         if convert_mode == "空耳":
-                            # 原代码中有额外的后处理，现在已在函数内完成，保留以防万一
+                            # 保留英文之后可能还有多余括号，再做一次清理
                             result = re.sub(r'\([^)]*\)', '', result).replace(' ', '')
                         converted.append((i, line, result))
                         add_log(f"✅ 转换 [{i+1}/{total}]: {line[:20]}...")
