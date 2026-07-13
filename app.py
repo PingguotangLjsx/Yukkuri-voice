@@ -188,24 +188,25 @@ def process_audio_pitch_in_memory(audio_data, pitch_factor):
             except:
                 pass
 
-# ---------- 本地转换函数（保留英文） ----------
+# ---------- 核心转换函数（只转换中文字符） ----------
 def convert_to_katakana(text):
     """
     将中文文本转换为片假名（基于本地拼音映射表）
-    英文字母 (a-zA-Z) 原样保留，不转换。
-    数字、标点等非中文非英文字符也会原样保留。
+    只转换中文字符（CJK统一汉字 U+4E00~U+9FFF），其他字符原样保留。
     """
-    pinyin_list = pypinyin.lazy_pinyin(text)
     result = []
-    for ch, py in zip(text, pinyin_list):
-        # 如果字符是英文字母（a-z 或 A-Z），原样保留
-        if ch.isalpha() and ch.isascii():
-            result.append(ch)
-        elif py in PINYIN_TO_KATAKANA:
-            result.append(PINYIN_TO_KATAKANA[py])
+    for ch in text:
+        # 判断是否为基本汉字
+        if '\u4e00' <= ch <= '\u9fff':
+            py_list = pypinyin.lazy_pinyin(ch)
+            if py_list:
+                py = py_list[0]
+                result.append(PINYIN_TO_KATAKANA.get(py, ch))
+            else:
+                result.append(ch)
         else:
-            # 未收录的音节（如特殊符号、数字等）保留原字符
             result.append(ch)
+    # 去除可能残留的括号和空格（保持与旧逻辑兼容）
     result_str = ''.join(result)
     result_str = re.sub(r'\([^)]*\)', '', result_str).replace(' ', '')
     return result_str
@@ -415,8 +416,8 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
                 try:
                     result = future.result(timeout=20)
                     if result:
+                        # 对空耳模式再做一次清理（括号和空格）
                         if convert_mode == "空耳":
-                            # 保留英文之后可能还有多余括号，再做一次清理
                             result = re.sub(r'\([^)]*\)', '', result).replace(' ', '')
                         converted.append((i, line, result))
                         add_log(f"✅ 转换 [{i+1}/{total}]: {line[:20]}...")
