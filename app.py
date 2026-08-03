@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-import random
 import concurrent.futures
 import time
 import tempfile
@@ -11,16 +10,15 @@ import requests
 import re
 import shutil
 import base64
+import ctypes
 from urllib.parse import quote
 from datetime import datetime
-from bs4 import BeautifulSoup
-
 import pypinyin
-from katakana_map import PINYIN_TO_KATAKANA
+from katakana_map import PINYIN_TO_KATAKANA   # 确保这个文件存在
 
 st.set_page_config(page_title="油库里语音生成器", page_icon="🎤", layout="wide")
-st.title("🎤 油库里语音生成器 (网页版)")
-st.caption("中文 → 空耳片假名 / 日语翻译 → AquesTalk 语音合成")
+st.title("🎤 油库里语音生成器 (本地版)")
+st.caption("中文 → 空耳片假名 / 日语翻译 → AquesTalk 语音合成 (本地DLL)")
 
 # ---------- 会话状态 ----------
 if "generated_audio_files" not in st.session_state:
@@ -40,69 +38,21 @@ if "progress" not in st.session_state:
 if "progress_text" not in st.session_state:
     st.session_state.progress_text = "等待开始..."
 
-# ---------- 声线数据 ----------
-voice_options = [
-    {"value": "aqtk1-f1", "name": "AT1-F1"},
-    {"value": "aqtk1-f2", "name": "AT1-F2"},
-    {"value": "aqtk1-m1", "name": "AT1-M1"},
-    {"value": "aqtk1-m2", "name": "AT1-M2"},
-    {"value": "aqtk1-dvd", "name": "AT1-DVD"},
-    {"value": "aqtk1-imd1", "name": "AT1-IMD1"},
-    {"value": "aqtk1-jgr", "name": "AT1-JGR"},
-    {"value": "aqtk1-r1", "name": "AT1-R1"},
-    {"value": "aqtk2-rm", "name": "AT2-RM"},
-    {"value": "aqtk2-f1c", "name": "AT2-F1C"},
-    {"value": "aqtk2-f3a", "name": "AT2-F3A"},
-    {"value": "aqtk2-huskey", "name": "AT2-HUSKEY"},
-    {"value": "aqtk2-m4b", "name": "AT2-M4B"},
-    {"value": "aqtk2-mf1", "name": "AT2-MF1"},
-    {"value": "aqtk2-rb2", "name": "AT2-RB2"},
-    {"value": "aqtk2-rb3", "name": "AT2-RB3"},
-    {"value": "aqtk2-robo", "name": "AT2-ROBO"},
-    {"value": "aqtk2-yukkuri", "name": "AT2-YUKKURI"},
-    {"value": "aqtk2-f4", "name": "AT2-F4"},
-    {"value": "aqtk2-m5", "name": "AT2-M5"},
-    {"value": "aqtk2-mf2", "name": "AT2-MF2"},
-    {"value": "aqtk2-rm3", "name": "AT2-RM3"},
-    {"value": "aqtk10-f1", "name": "AT10-F1"},
-    {"value": "aqtk10-f2", "name": "AT10-F2"},
-    {"value": "aqtk10-f3", "name": "AT10-F3"},
-    {"value": "aqtk10-m1", "name": "AT10-M1"},
-    {"value": "aqtk10-m2", "name": "AT10-M2"},
-    {"value": "aqtk10-r1", "name": "AT10-R1"},
-    {"value": "aqtk10-r2", "name": "AT10-R2"}
-]
+# ---------- 配置：DLL根目录 ----------
+# 请修改为你的实际路径，每个子文件夹名就是音色名，里面放着 AquesTalk.dll
+DLL_ROOT = r"E:\download\aqtk1_win_200\aqtk1_win\lib64"   # 修改这里
 
-api_templates = [
-    "https://www.yukumo.net/api/v2/aqtk1/koe.mp3?type=f1&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk1/koe.mp3?type=f2&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk1/koe.mp3?type=m1&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk1/koe.mp3?type=m2&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk1/koe.mp3?type=dvd&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk1/koe.mp3?type=imd1&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk1/koe.mp3?type=jgr&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk1/koe.mp3?type=r1&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=rm&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=f1c&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=f3a&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=huskey&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=m4b&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=mf1&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=rb2&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=rb3&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=robo&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=yukkuri&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=f4&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=m5&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=mf2&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk2/koe.mp3?type=rm3&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk10/koe.mp3?type=f1e&speed=100&volume=100&pitch=100&accent=100&lmd=100&fsc=100&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk10/koe.mp3?type=f2e&speed=100&volume=100&pitch=77&accent=150&lmd=100&fsc=100&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk10/koe.mp3?type=f1e&speed=80&volume=100&pitch=100&accent=100&lmd=61&fsc=148&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk10/koe.mp3?type=m1e&speed=100&volume=100&pitch=30&accent=100&lmd=100&fsc=100&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk10/koe.mp3?type=m1e&speed=105&volume=100&pitch=45&accent=130&lmd=120&fsc=100&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk10/koe.mp3?type=m1e&speed=100&volume=100&pitch=30&accent=20&lmd=190&fsc=100&kanji={text}",
-    "https://www.yukumo.net/api/v2/aqtk10/koe.mp3?type=f2e&speed=70&volume=100&pitch=50&accent=50&lmd=50&fsc=180&kanji={text}"
+# ---------- 声线数据（只保留可用的9个） ----------
+voice_options = [
+    {"value": "dvd",   "name": "DVD"},
+    {"value": "f1",    "name": "F1"},
+    {"value": "f2",    "name": "F2"},
+    {"value": "f3",    "name": "F3"},
+    {"value": "imd1",  "name": "IMD1"},
+    {"value": "jgr",   "name": "JGR"},
+    {"value": "m1",    "name": "M1"},
+    {"value": "m2",    "name": "M2"},
+    {"value": "r1",    "name": "R1"}
 ]
 
 # ---------- 工具函数 ----------
@@ -121,6 +71,7 @@ def get_ffmpeg_path():
     return None
 
 def change_pitch_audio(audio_data, sample_rate, pitch_factor):
+    """简单的线性插值变调（保持采样率不变）"""
     try:
         if pitch_factor == 100:
             return audio_data
@@ -145,42 +96,32 @@ def change_pitch_audio(audio_data, sample_rate, pitch_factor):
         return audio_data
 
 def process_audio_pitch_in_memory(audio_data, pitch_factor):
+    """对内存中的音频数据（WAV格式 bytes）进行变调，返回处理后的 WAV bytes"""
+    if pitch_factor == 100:
+        return audio_data
+    ffmpeg_path = get_ffmpeg_path()
+    if not ffmpeg_path:
+        return audio_data
     temp_files = []
     try:
-        ffmpeg_path = get_ffmpeg_path()
-        if not ffmpeg_path:
-            return None
-        with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
             f.write(audio_data)
             temp_in = f.name
             temp_files.append(temp_in)
-        temp_wav = tempfile.mktemp(suffix='.wav')
-        temp_files.append(temp_wav)
-        subprocess.run([
-            ffmpeg_path, '-i', temp_in, '-acodec', 'pcm_s16le',
-            '-ar', '44100', '-ac', '1', '-y', temp_wav
-        ], capture_output=True, check=True)
-        with wave.open(temp_wav, 'rb') as wav:
+        with wave.open(temp_in, 'rb') as wav:
+            params = wav.getparams()
             frames = wav.readframes(-1)
             sr = wav.getframerate()
-        adj = change_pitch_audio(frames, sr, pitch_factor)
-        temp_adj_wav = tempfile.mktemp(suffix='.wav')
-        temp_files.append(temp_adj_wav)
-        with wave.open(temp_adj_wav, 'wb') as wav:
-            wav.setnchannels(1)
-            wav.setsampwidth(2)
-            wav.setframerate(sr)
-            wav.writeframes(adj)
-        temp_out = tempfile.mktemp(suffix='.mp3')
+        adjusted = change_pitch_audio(frames, sr, pitch_factor)
+        temp_out = tempfile.mktemp(suffix='.wav')
         temp_files.append(temp_out)
-        subprocess.run([
-            ffmpeg_path, '-i', temp_adj_wav, '-acodec', 'libmp3lame',
-            '-ab', '64k', '-y', temp_out
-        ], capture_output=True, check=True)
+        with wave.open(temp_out, 'wb') as wav:
+            wav.setparams(params)
+            wav.writeframes(adjusted)
         with open(temp_out, 'rb') as f:
             return f.read()
     except Exception:
-        return None
+        return audio_data
     finally:
         for f in temp_files:
             try:
@@ -188,15 +129,10 @@ def process_audio_pitch_in_memory(audio_data, pitch_factor):
             except:
                 pass
 
-# ---------- 核心转换函数（只转换中文字符） ----------
 def convert_to_katakana(text):
-    """
-    将中文文本转换为片假名（基于本地拼音映射表）
-    只转换中文字符（CJK统一汉字 U+4E00~U+9FFF），其他字符原样保留。
-    """
+    """将中文文本转换为片假名（基于本地拼音映射表）"""
     result = []
     for ch in text:
-        # 判断是否为基本汉字
         if '\u4e00' <= ch <= '\u9fff':
             py_list = pypinyin.lazy_pinyin(ch)
             if py_list:
@@ -206,7 +142,6 @@ def convert_to_katakana(text):
                 result.append(ch)
         else:
             result.append(ch)
-    # 去除可能残留的括号和空格（保持与旧逻辑兼容）
     result_str = ''.join(result)
     result_str = re.sub(r'\([^)]*\)', '', result_str).replace(' ', '')
     return result_str
@@ -246,6 +181,7 @@ def translate_to_japanese(text):
     return text
 
 def get_audio_duration(file_path):
+    """获取音频时长（毫秒）"""
     try:
         ffmpeg = get_ffmpeg_path()
         if not ffmpeg:
@@ -270,44 +206,7 @@ def format_srt_time(ms):
     ms %= 1000
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
-def build_api_url(text, voice_idx, effect, boyomi, speed, volume):
-    base = api_templates[voice_idx]
-    enc = quote(text)
-    boyomi_str = "true" if boyomi else "false"
-    if "aqtk1" in base or "aqtk2" in base:
-        url = base.replace("{text}", enc)
-        url += f"&effect={effect}&boyomi={boyomi_str}&speed={speed}&volume={volume}"
-    else:
-        url = base.replace("{text}", enc)
-        url = re.sub(r'speed=\d+', f'speed={speed}', url)
-        url = re.sub(r'volume=\d+', f'volume={volume}', url)
-        url += f"&effect={effect}&boyomi={boyomi_str}"
-    return url
-
-def generate_single_audio(conv_text, voice_idx, output_dir, orig_text, idx, total, params):
-    effect, boyomi, speed, volume, pitch = params
-    try:
-        api_url = build_api_url(conv_text, voice_idx, effect, boyomi, speed, volume)
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        time.sleep(random.uniform(0.2, 0.8))
-        resp = requests.get(api_url, headers=headers, timeout=30)
-        if resp.status_code != 200:
-            return False, None, 0, f"HTTP {resp.status_code}"
-        audio_data = resp.content
-        if pitch != 100:
-            adjusted = process_audio_pitch_in_memory(audio_data, pitch)
-            if adjusted:
-                audio_data = adjusted
-        safe_name = re.sub(r'[<>:"/\\|?*]', '_', orig_text)[:50]
-        filename = f"{idx+1:03d}_{safe_name}.mp3"
-        filepath = os.path.join(output_dir, filename)
-        with open(filepath, 'wb') as f:
-            f.write(audio_data)
-        duration = get_audio_duration(filepath)
-        return True, filepath, duration, None
-    except Exception as e:
-        return False, None, 0, str(e)
-
+# ---------- 下载链接生成函数（提前定义） ----------
 def get_binary_file_downloader_html(bin_data, file_label='下载', file_name='file.mp3', button_style=True):
     b64 = base64.b64encode(bin_data).decode()
     if button_style:
@@ -326,6 +225,73 @@ def get_binary_file_downloader_html(bin_data, file_label='下载', file_name='fi
     else:
         return f'<a href="data:application/octet-stream;base64,{b64}" download="{file_name}">⬇️ {file_label}</a>'
 
+# ---------- 核心：调用本地DLL合成语音 ----------
+def synthesize_with_aquestalk(text, dll_path, speed=100):
+    """调用 AquesTalk.dll 合成 WAV 数据（bytes），返回 (wav_bytes, sample_rate)"""
+    try:
+        dll = ctypes.WinDLL(dll_path)
+    except OSError:
+        return None, None
+
+    try:
+        synthe_func = dll.AquesTalk_Synthe
+        free_func = dll.AquesTalk_FreeWave
+    except AttributeError:
+        return None, None
+
+    synthe_func.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int)]
+    synthe_func.restype = ctypes.POINTER(ctypes.c_ubyte)
+    free_func.argtypes = [ctypes.c_void_p]
+    free_func.restype = None
+
+    try:
+        text_encoded = text.encode('shift_jis')
+    except UnicodeEncodeError:
+        return None, None
+
+    audio_size = ctypes.c_int()
+    wav_data_ptr = synthe_func(text_encoded, speed, ctypes.byref(audio_size))
+    if not wav_data_ptr:
+        return None, None
+
+    wav_bytes = bytes(wav_data_ptr[:audio_size.value])
+    free_func(wav_data_ptr)
+
+    try:
+        import io
+        with io.BytesIO(wav_bytes) as f:
+            with wave.open(f, 'rb') as w:
+                sr = w.getframerate()
+        return wav_bytes, sr
+    except:
+        return wav_bytes, 8000
+
+def generate_single_audio(conv_text, voice_value, output_dir, orig_text, idx, total, params):
+    """使用本地DLL生成单个音频文件，返回 (成功, 文件路径, 时长ms, 错误信息)"""
+    _, _, speed, _, pitch = params  # effect, boyomi, volume 忽略
+    try:
+        dll_path = os.path.join(DLL_ROOT, voice_value, "AquesTalk.dll")
+        if not os.path.exists(dll_path):
+            return False, None, 0, f"DLL不存在: {dll_path}"
+
+        wav_data, _ = synthesize_with_aquestalk(conv_text, dll_path, speed)
+        if wav_data is None:
+            return False, None, 0, "合成失败（可能文本不支持）"
+
+        if pitch != 100:
+            wav_data = process_audio_pitch_in_memory(wav_data, pitch)
+
+        safe_name = re.sub(r'[<>:"/\\|?*]', '_', orig_text)[:50]
+        filename = f"{idx+1:03d}_{safe_name}.wav"
+        filepath = os.path.join(output_dir, filename)
+        with open(filepath, 'wb') as f:
+            f.write(wav_data)
+
+        duration = get_audio_duration(filepath)
+        return True, filepath, duration, None
+    except Exception as e:
+        return False, None, 0, str(e)
+
 # ---------- UI 侧边栏 ----------
 with st.sidebar:
     st.header("⚙️ 参数设置")
@@ -335,15 +301,11 @@ with st.sidebar:
     voice_names = [v["name"] for v in voice_options]
     selected_voice = st.selectbox("语音类型", voice_names)
     voice_index = voice_names.index(selected_voice)
+    voice_value = voice_options[voice_index]["value"]
 
     st.divider()
     st.subheader("🎛️ 高级参数")
-    effect_label = st.radio("音效", ["无效果", "回声效果"], index=0, horizontal=True)
-    effect = "none" if effect_label == "无效果" else "echo"
-    boyomi_label = st.radio("捧读", ["OFF", "ON"], index=0, horizontal=True)
-    boyomi = (boyomi_label == "ON")
-    speed = st.slider("速度", 50, 300, 100, step=1)
-    volume = st.slider("音量", 10, 200, 100, step=1)
+    speed = st.slider("语速", 50, 300, 100, step=1)
     pitch = st.slider("音程", 0, 300, 100, step=1)
 
     st.divider()
@@ -372,6 +334,7 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
     if not lines:
         st.warning("请输入至少一行文本")
     else:
+        # 重置状态
         st.session_state.generated_audio_files = []
         st.session_state.subtitle_file_path = None
         st.session_state.zip_data = None
@@ -416,7 +379,6 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
                 try:
                     result = future.result(timeout=20)
                     if result:
-                        # 对空耳模式再做一次清理（括号和空格）
                         if convert_mode == "空耳":
                             result = re.sub(r'\([^)]*\)', '', result).replace(' ', '')
                         converted.append((i, line, result))
@@ -439,13 +401,13 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
         success_count = 0
         audio_files = []
         subtitle_entries = []
-        params = (effect, boyomi, speed, volume, pitch)
+        params = (None, None, speed, 100, pitch)   # effect, boyomi, volume 忽略
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_info = {}
             for idx, (orig_idx, orig_text, conv_text) in enumerate(converted):
                 future = executor.submit(
-                    generate_single_audio, conv_text, voice_index, output_dir,
+                    generate_single_audio, conv_text, voice_value, output_dir,
                     orig_text, idx, len(converted), params
                 )
                 future_to_info[future] = (idx, orig_text, orig_idx)
@@ -507,7 +469,7 @@ if st.session_state.generated_audio_files:
             st.write(f"**{idx}. {orig}**")
         with col2:
             with open(path, "rb") as f:
-                st.audio(f.read(), format="audio/mp3")
+                st.audio(f.read(), format="audio/wav")
         with col3:
             with open(path, "rb") as f:
                 data = f.read()
