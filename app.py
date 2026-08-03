@@ -40,7 +40,7 @@ if "progress_text" not in st.session_state:
 
 # ---------- 配置：DLL根目录 ----------
 # 请修改为你的实际路径，每个子文件夹名就是音色名，里面放着 AquesTalk.dll
-DLL_ROOT = r"E:\download\aqtk1_win_200\aqtk1_win\lib64"   # 修改这里
+DLL_ROOT = r"AquesTalkDLLs"   # 修改这里
 
 # ---------- 声线数据（只保留可用的9个） ----------
 voice_options = [
