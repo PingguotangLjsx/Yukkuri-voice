@@ -4,3 +4,4 @@ beautifulsoup4>=4.12.0
 numpy>=1.24.0
 pypinyin
 edge-tts>=6.1.0
+zugbruecke>=0.0.15
