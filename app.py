@@ -15,8 +15,8 @@ import pypinyin
 from katakana_map import PINYIN_TO_KATAKANA   # 确保此文件存在
 
 st.set_page_config(page_title="油库里语音生成器", page_icon="🎤", layout="wide")
-st.title("🎤 油库里语音生成器 (本地空耳版)")
-st.caption("中文 → 空耳片假名 → AquesTalk 语音合成 (本地DLL)")
+st.title("🎤 油库里语音生成器")
+st.caption("中文 → 空耳片假名 → AquesTalk 语音合成")
 
 # ---------- 会话状态 ----------
 if "generated_audio_files" not in st.session_state:
@@ -55,7 +55,6 @@ voice_options = [
 
 # ---------- 工具函数 ----------
 def get_ffmpeg_path():
-    """查找系统是否安装 ffmpeg，返回路径或 None"""
     import shutil
     ffmpeg_path = shutil.which('ffmpeg')
     if ffmpeg_path:
@@ -70,7 +69,6 @@ def get_ffmpeg_path():
     return None
 
 def change_pitch_audio(audio_data, sample_rate, pitch_factor):
-    """简单的线性插值变调（保持采样率不变）"""
     try:
         if pitch_factor == 100:
             return audio_data
@@ -95,12 +93,11 @@ def change_pitch_audio(audio_data, sample_rate, pitch_factor):
         return audio_data
 
 def process_audio_pitch_in_memory(audio_data, pitch_factor):
-    """对内存中的 WAV 数据进行变调，返回处理后的 WAV bytes"""
     if pitch_factor == 100:
         return audio_data
     ffmpeg_path = get_ffmpeg_path()
     if not ffmpeg_path:
-        return audio_data   # 无 ffmpeg 则不变调
+        return audio_data
     temp_files = []
     try:
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
@@ -129,7 +126,6 @@ def process_audio_pitch_in_memory(audio_data, pitch_factor):
                 pass
 
 def convert_to_katakana(text):
-    """将中文文本转换为片假名（基于本地拼音映射表）"""
     result = []
     for ch in text:
         if '\u4e00' <= ch <= '\u9fff':
@@ -146,7 +142,6 @@ def convert_to_katakana(text):
     return result_str
 
 def get_audio_duration(file_path):
-    """获取音频时长（毫秒）"""
     try:
         ffmpeg = get_ffmpeg_path()
         if not ffmpeg:
@@ -189,19 +184,15 @@ def get_binary_file_downloader_html(bin_data, file_label='下载', file_name='fi
     else:
         return f'<a href="data:application/octet-stream;base64,{b64}" download="{file_name}">⬇️ {file_label}</a>'
 
-# ---------- 核心：调用本地DLL合成语音（增强版） ----------
+# ---------- 核心：调用DLL合成语音（增强版） ----------
 def synthesize_with_aquestalk(text, dll_path, speed=100):
-    """
-    调用 AquesTalk.dll 合成 WAV 数据（bytes）
-    支持多种导出函数名，返回 (wav_bytes, sample_rate) 或 (None, None)
-    """
     try:
         dll = ctypes.WinDLL(dll_path)
     except OSError as e:
-        st.error(f"加载 DLL 失败: {e}")
+        st.error(f"加载语音引擎失败: {e}")
         return None, None
 
-    # 尝试多种可能的导出函数名（AquesTalk1 常见命名）
+    # 尝试多种可能的导出函数名
     func_names = ['AquesTalk_Synthe', '_AquesTalk_Synthe@12', 'AquesTalk_Synthe@12']
     synthe_func = None
     for name in func_names:
@@ -211,10 +202,9 @@ def synthesize_with_aquestalk(text, dll_path, speed=100):
         except AttributeError:
             continue
     if synthe_func is None:
-        st.error("未找到合成导出函数，请确认 DLL 版本是否正确。")
+        st.error("语音引擎不兼容，请检查 DLL 版本。")
         return None, None
 
-    # 释放函数（可选）
     free_func_names = ['AquesTalk_FreeWave', '_AquesTalk_FreeWave@4']
     free_func = None
     for name in free_func_names:
@@ -240,18 +230,17 @@ def synthesize_with_aquestalk(text, dll_path, speed=100):
     try:
         wav_data_ptr = synthe_func(text_encoded, speed, ctypes.byref(audio_size))
     except Exception as e:
-        st.error(f"调用合成函数异常: {e}")
+        st.error(f"合成过程出错: {e}")
         return None, None
 
     if not wav_data_ptr:
-        st.error("合成返回空指针，可能文本包含不支持字符。")
+        st.error("合成失败，可能包含不支持的字符。")
         return None, None
 
     wav_bytes = bytes(wav_data_ptr[:audio_size.value])
     if free_func:
         free_func(wav_data_ptr)
 
-    # 尝试解析采样率
     try:
         import io
         with io.BytesIO(wav_bytes) as f:
@@ -259,25 +248,21 @@ def synthesize_with_aquestalk(text, dll_path, speed=100):
                 sr = w.getframerate()
         return wav_bytes, sr
     except:
-        # 若解析失败，默认 8000 Hz
         return wav_bytes, 8000
 
 def generate_single_audio(conv_text, voice_value, output_dir, orig_text, idx, total, params):
-    """生成单个音频文件，返回 (成功, 文件路径, 时长ms, 错误信息)"""
     _, _, speed, _, pitch = params
     try:
         dll_path = os.path.join(DLL_ROOT, voice_value, "AquesTalk.dll")
         if not os.path.exists(dll_path):
-            return False, None, 0, f"DLL不存在: {dll_path}"
+            return False, None, 0, f"语音文件缺失: {dll_path}"
 
         wav_data, _ = synthesize_with_aquestalk(conv_text, dll_path, speed)
         if wav_data is None:
             return False, None, 0, "合成失败"
 
-        # 音程调节（如果 pitch != 100 且有 ffmpeg）
         if pitch != 100:
             wav_data = process_audio_pitch_in_memory(wav_data, pitch)
-            # 如果 ffmpeg 缺失，process_audio_pitch_in_memory 会原样返回，不会报错
 
         safe_name = re.sub(r'[<>:"/\\|?*]', '_', orig_text)[:50]
         filename = f"{idx+1:03d}_{safe_name}.wav"
@@ -293,12 +278,11 @@ def generate_single_audio(conv_text, voice_value, output_dir, orig_text, idx, to
 # ---------- UI 侧边栏 ----------
 with st.sidebar:
     st.header("⚙️ 参数设置")
-    st.info("当前仅支持「空耳 (片假名)」转换模式")
 
-    # 检查 ffmpeg 是否可用
+    # ffmpeg 检查（仅提示）
     ffmpeg_ok = get_ffmpeg_path() is not None
     if not ffmpeg_ok:
-        st.warning("⚠️ 未找到 ffmpeg，音程调节将无效。请安装 ffmpeg 并添加到 PATH。")
+        st.info("💡 音程调节需要 ffmpeg 支持，若未安装则无效。")
 
     voice_names = [v["name"] for v in voice_options]
     selected_voice = st.selectbox("语音类型", voice_names)
@@ -308,7 +292,7 @@ with st.sidebar:
     st.divider()
     st.subheader("🎛️ 高级参数")
     speed = st.slider("语速", 50, 300, 100, step=1)
-    pitch = st.slider("音程", 0, 300, 100, step=1, help="需要 ffmpeg 支持，若未安装则无效")
+    pitch = st.slider("音程", 0, 300, 100, step=1)
 
     st.divider()
     st.subheader("📁 输出选项")
@@ -365,9 +349,8 @@ if st.button("🚀 开始生成", type="primary", use_container_width=True):
 
         add_log("===== 开始处理 =====")
         add_log(f"使用并发数: {max_workers}")
-        add_log(f"DLL根目录: {DLL_ROOT}")
         if not get_ffmpeg_path():
-            add_log("⚠️ ffmpeg 未找到，音程调节无效")
+            add_log("提示: ffmpeg 未找到，音程调节将跳过")
         update_progress(0.05, "转换文本中...")
 
         # 转换空耳
